@@ -37,23 +37,39 @@ import {
     ArrowLeft, Ticket, ClipboardSignature, FileText, Globe
 } from 'lucide-react';
 
-// Firebase Configuration (to be replaced by __firebase_config in environment)
+// --- INÍCIO DA CONFIGURAÇÃO DO FIREBASE ---
+// Verifique esta seção com atenção!
+
+// Tenta carregar a configuração de uma variável de ambiente (comum em algumas plataformas de prototipagem)
 const firebaseConfigFromEnv = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+
+// Objeto de configuração do Firebase.
+// !!! IMPORTANTE: Se __firebase_config não estiver definida no seu ambiente, 
+// !!! você PRECISA substituir os valores abaixo pelas chaves REAIS do seu projeto Firebase.
+// !!! Você pode encontrar esses valores no console do Firebase:
+// !!! Configurações do projeto (ícone de engrenagem) > Geral > Seus apps > Configuração de SDK.
 const parsedFirebaseConfig = firebaseConfigFromEnv ? JSON.parse(firebaseConfigFromEnv) : {
-    apiKey: "YOUR_API_KEY", // Replace if testing locally and not in Canvas
-    authDomain: "YOUR_AUTH_DOMAIN",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_STORAGE_BUCKET",
-    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "SUA_API_KEY_AQUI",
+    authDomain: "SEU_PROJETO_ID.firebaseapp.com", // Ex: voluntech-app.firebaseapp.com
+    projectId: "SEU_PROJETO_ID_AQUI",          // Ex: voluntech-app
+    storageBucket: "SEU_PROJETO_ID.appspot.com", // Ex: voluntech-app.appspot.com
+    messagingSenderId: "SEU_MESSAGING_SENDER_ID_AQUI",
+    appId: "SEU_APP_ID_DE_CONFIGURACAO_WEB_AQUI" // App ID da configuração do seu app Web no Firebase
 };
 
-const app = initializeApp(parsedFirebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-setLogLevel('debug'); // Firestore logging
+// Inicializa o Firebase
+const firebaseApp = initializeApp(parsedFirebaseConfig); 
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 
+// Habilita logs detalhados do Firestore para ajudar na depuração durante o desenvolvimento.
+// Comente ou remova em produção.
+setLogLevel('debug'); 
+
+// ID da Aplicação para caminhos no Firestore.
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'voluntech-app';
+// --- FIM DA CONFIGURAÇÃO DO FIREBASE ---
+
 
 // Auth Context
 const AuthContext = createContext();
@@ -69,35 +85,46 @@ export const AuthProvider = ({ children }) => {
         const initialAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    console.log("Attempting sign in with custom token...");
                     await signInWithCustomToken(auth, __initial_auth_token);
+                    console.log("Signed in with custom token successfully.");
                 } else {
-                    if (!auth.currentUser) {
-                        // console.log("No current user, attempting anonymous sign-in for initial auth check.");
-                        // await signInAnonymously(auth); 
-                    }
+                     console.log("No initial auth token found. User state will be determined by onAuthStateChanged.");
                 }
             } catch (error) {
-                console.error("Error during initial auth:", error);
-                // await signInAnonymously(auth); 
+                console.error("Error during initial auth with custom token:", error);
             }
 
             const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                console.log("onAuthStateChanged triggered. User:", user ? user.uid : null);
                 setCurrentUser(user);
                 if (user) {
                     const userDocRef = doc(db, `/artifacts/${appId}/public/data/users/${user.uid}`);
-                    const userDocSnap = await getDoc(userDocRef);
-                    if (userDocSnap.exists()) {
-                        setUserData({ id: userDocSnap.id, ...userDocSnap.data() });
-                    } else {
-                        setUserData(null); 
+                    try {
+                        const userDocSnap = await getDoc(userDocRef);
+                        if (userDocSnap.exists()) {
+                            console.log("User document found:", userDocSnap.data());
+                            setUserData({ id: userDocSnap.id, ...userDocSnap.data() });
+                        } else {
+                            console.warn("User document not found in Firestore for UID:", user.uid);
+                            setUserData(null); 
+                        }
+                    } catch (dbError) {
+                        console.error("Error fetching user document from Firestore:", dbError);
+                        setUserData(null);
                     }
                 } else {
+                    console.log("User is signed out.");
                     setUserData(null);
                 }
                 setLoading(false);
                 setIsAuthReady(true);
+                console.log("Auth state processed. Loading:", false, "isAuthReady:", true);
             });
-            return () => unsubscribe();
+            return () => {
+                console.log("Unsubscribing from onAuthStateChanged.");
+                unsubscribe();
+            };
         };
         initialAuth();
     }, []);
@@ -192,7 +219,7 @@ function App() {
         }
     };
 
-    if (loading || !isAuthReady) {
+    if (loading || !isAuthReady) { 
         return <LoadingSpinner />;
     }
 
@@ -206,7 +233,7 @@ function App() {
                 {currentPage === 'opportunityDetails' && selectedOpportunity && <OpportunityDetailsPage opportunity={selectedOpportunity} navigate={navigate} />}
                 {currentPage === 'volunteerDashboard' && userData?.role === 'volunteer' && <VolunteerDashboard navigate={navigate} />}
                 {currentPage === 'organizationDashboard' && userData?.role === 'organization' && <OrganizationDashboard navigate={navigate} />}
-                {currentPage === 'profile' && <UserProfilePage navigate={navigate} />}
+                {currentPage === 'profile' && currentUser && <UserProfilePage navigate={navigate} />} 
                 {currentPage === 'eventDetails' && selectedEvent && <EventDetailsPage event={selectedEvent} navigate={navigate} />}
                 {currentPage === 'eventRegistration' && selectedEvent && <EventRegistrationPage event={selectedEvent} navigate={navigate} handleShowMessage={handleShowMessage}/>}
                 {currentPage === 'opportunityApplication' && selectedOpportunity && <OpportunityApplicationPage opportunity={selectedOpportunity} navigate={navigate} handleShowMessage={handleShowMessage} />}
@@ -388,6 +415,7 @@ const AuthModal = ({ mode, setMode, onClose, navigate, handleShowMessage }) => {
                 onClose();
                 navigate(role === 'volunteer' ? 'volunteerDashboard' : 'organizationDashboard');
             } catch (err) {
+                console.error("Signup error:", err);
                 setError(err.message);
                 handleShowMessage(`Erro no cadastro: ${err.message}`, 'error');
             }
@@ -398,6 +426,7 @@ const AuthModal = ({ mode, setMode, onClose, navigate, handleShowMessage }) => {
                 onClose();
                  navigate('home'); 
             } catch (err) {
+                console.error("Login error:", err);
                 setError(err.message);
                 handleShowMessage(`Erro no login: ${err.message}`, 'error');
             }
@@ -498,6 +527,7 @@ const sampleEvents = [
     }
 ];
 
+// START OF MODIFIED SECTION: HomePage with updated header buttons
 const HomePage = ({ navigate, setShowAuthModal, setAuthMode }) => {
     const { currentUser } = useAuth();
     return (
@@ -505,7 +535,7 @@ const HomePage = ({ navigate, setShowAuthModal, setAuthMode }) => {
         <header className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-20 rounded-lg shadow-xl mb-12">
             <h1 className="text-5xl font-bold mb-4">Bem-vindo ao VolunTech!</h1>
             <p className="text-xl mb-8 max-w-2xl mx-auto">Sua plataforma para encontrar e oferecer oportunidades de voluntariado. Juntos, podemos fazer a diferença.</p>
-            <div className="space-y-4 sm:space-y-0 sm:space-x-4">
+            <div className="space-y-4 sm:space-y-0 sm:flex sm:justify-center sm:space-x-4">
                 <button 
                     onClick={() => navigate('opportunities')}
                     className="w-full sm:w-auto bg-yellow-400 hover:bg-yellow-500 text-blue-700 font-semibold py-3 px-8 rounded-lg text-lg shadow-md transition duration-150 transform hover:scale-105"
@@ -513,12 +543,20 @@ const HomePage = ({ navigate, setShowAuthModal, setAuthMode }) => {
                     <Search className="inline mr-2" /> Ver Oportunidades
                 </button>
                 {!currentUser && (
-                    <button 
-                        onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
-                        className="w-full sm:w-auto bg-white hover:bg-gray-100 text-indigo-600 font-semibold py-3 px-8 rounded-lg text-lg shadow-md transition duration-150 transform hover:scale-105"
-                    >
-                        <UserPlus className="inline mr-2" /> Cadastre-se / Cadastrar ONG
-                    </button>
+                    <>
+                        <button
+                            onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+                            className="w-full sm:w-auto bg-white hover:bg-gray-100 text-indigo-600 font-semibold py-3 px-8 rounded-lg text-lg shadow-md transition duration-150 transform hover:scale-105"
+                        >
+                            <LogIn className="inline mr-2" /> Entrar
+                        </button>
+                        <button
+                            onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
+                            className="w-full sm:w-auto bg-green-400 hover:bg-green-500 text-white font-semibold py-3 px-8 rounded-lg text-lg shadow-md transition duration-150 transform hover:scale-105"
+                        >
+                            <UserPlus className="inline mr-2" /> Cadastre-se
+                        </button>
+                    </>
                 )}
             </div>
         </header>
@@ -605,19 +643,19 @@ const HomePage = ({ navigate, setShowAuthModal, setAuthMode }) => {
         </section>
     </div>
 )};
+// END OF MODIFIED SECTION
 
-// START OF MODIFIED SECTION: OpportunitiesPage with region filter
 const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShowMessage }) => {
     const [opportunities, setOpportunities] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
     const [filterLocationType, setFilterLocationType] = useState('');
-    const [filterRegion, setFilterRegion] = useState(''); // New state for region filter
+    const [filterRegion, setFilterRegion] = useState(''); 
     const [error, setError] = useState('');
 
     const categories = ["Ajuda Humanitária", "Assistência Social", "Meio Ambiente", "Educação", "Saúde", "Animais", "Cultura", "Direitos Humanos", "Tecnologia Social", "Outros"];
-    const regions = ["Norte", "Nordeste", "Sul", "Sudeste", "Centro-Oeste"]; // Brazilian regions
+    const regions = ["Norte", "Nordeste", "Sul", "Sudeste", "Centro-Oeste", "Todas"]; 
 
     const exampleOpportunities = [
         {
@@ -627,7 +665,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
             organizationName: 'SOS Enchentes RS',
             organizationId: 'org-sos-rs',
             category: 'Ajuda Humanitária',
-            region: 'Sul', // Added region
+            region: 'Sul', 
             date: Timestamp.fromDate(new Date('2025-06-10')),
             time: 'Integral (turnos a combinar)',
             locationType: 'Presencial',
@@ -646,7 +684,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
             organizationName: 'Cuidar Brumadinho',
             organizationId: 'org-cuidar-bruma',
             category: 'Assistência Social',
-            region: 'Sudeste', // Added region
+            region: 'Sudeste', 
             date: Timestamp.fromDate(new Date('2025-07-01')),
             time: 'Flexível (online), Sábados (presencial)',
             locationType: 'Presencial', 
@@ -665,7 +703,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
             organizationName: 'Verde Amazônia ONG',
             organizationId: 'org-verde-amazonia',
             category: 'Meio Ambiente',
-            region: 'Norte', // Added region
+            region: 'Norte', 
             date: Timestamp.fromDate(new Date('2025-08-15')), 
             time: 'Período de 7 dias (expedição)',
             locationType: 'Presencial',
@@ -684,7 +722,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
             organizationName: 'EducaAção Digital',
             organizationId: 'org-educacao-digital',
             category: 'Educação',
-            region: 'Todas', // Example for remote, can be any region or 'Todas'
+            region: 'Todas', 
             date: null, 
             time: '2-4 horas/semana (flexível)',
             locationType: 'Remoto',
@@ -703,7 +741,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
             organizationName: 'Hemocentro Vida+',
             organizationId: 'org-hemocentro-vidamais',
             category: 'Saúde',
-            region: 'Sudeste', // Added region
+            region: 'Sudeste', 
             date: Timestamp.fromDate(new Date('2025-06-25')),
             time: '09:00 - 17:00 (turnos disponíveis)',
             locationType: 'Presencial',
@@ -720,40 +758,16 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
     useEffect(() => {
         setLoading(true);
         setError('');
-        // For now, using example data. Firestore fetching logic is commented out.
-        // If re-enabling Firestore, ensure opportunities have a 'region' field.
         const sortedExampleOpportunities = [...exampleOpportunities].sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
         setOpportunities(sortedExampleOpportunities);
         setLoading(false);
-
-        /*
-        const fetchOpportunities = async () => {
-            setLoading(true);
-            setError('');
-            try {
-                const opportunitiesRef = collection(db, `/artifacts/${appId}/public/data/opportunities`);
-                // Add orderBy("region") if you want to sort by region in Firestore,
-                // but this requires a composite index if combined with other orderBy or where clauses.
-                let q = query(opportunitiesRef, where("status", "==", "Aberta"), orderBy("createdAt", "desc"));
-                
-                const querySnapshot = await getDocs(q);
-                const oppsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                setOpportunities(oppsList);
-            } catch (err) {
-                console.error("Error fetching opportunities: ", err);
-                setError("Não foi possível carregar as oportunidades. Tente novamente mais tarde.");
-            }
-            setLoading(false);
-        };
-        fetchOpportunities();
-        */
     }, []);
 
     const filteredOpportunities = opportunities.filter(opp => {
         const titleMatch = opp.title.toLowerCase().includes(searchTerm.toLowerCase());
         const categoryMatch = filterCategory ? opp.category === filterCategory : true;
         const locationTypeMatch = filterLocationType ? opp.locationType === filterLocationType : true;
-        const regionMatch = filterRegion ? (opp.region === filterRegion || opp.region === 'Todas') : true; // Updated for region
+        const regionMatch = filterRegion ? (opp.region === filterRegion || opp.region === 'Todas') : true; 
         return titleMatch && categoryMatch && locationTypeMatch && regionMatch;
     });
 
@@ -764,7 +778,7 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
         <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-8">Encontre Oportunidades</h1>
             <div className="mb-8 p-6 bg-white rounded-lg shadow-md">
-                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4"> {/* Adjusted grid for new filter */}
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4"> 
                     <input 
                         type="text" 
                         placeholder="Buscar por título..." 
@@ -796,7 +810,6 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
                     >
                         <option value="">Todas as Regiões</option>
                         {regions.map(reg => <option key={reg} value={reg}>{reg}</option>)}
-                        <option value="Todas">Todas (para remoto)</option>
                     </select>
                 </div>
             </div>
@@ -820,14 +833,13 @@ const OpportunitiesPage = ({ navigate, setShowAuthModal, setAuthMode, handleShow
         </div>
     );
 };
-// END OF MODIFIED SECTION
 
 const OpportunityCard = ({ opportunity, navigate, setShowAuthModal, setAuthMode, handleShowMessage }) => {
     const { currentUser, userData } = useAuth();
 
     const handleQuickApply = () => {
         if (!currentUser) {
-            setAuthMode('login');
+            setAuthMode('login'); // Sugestão: abrir em login para facilitar
             setShowAuthModal(true);
             return;
         }
@@ -886,8 +898,8 @@ const OpportunityDetailsPage = ({ opportunity, navigate }) => {
     const { currentUser, userData } = useAuth();
     const [message, setMessage] = useState('');
     const [applicationStatus, setApplicationStatus] = useState(null); 
-    const [showApplyModal, setShowApplyModal] = useState(false);
-    const [applicationMessage, setApplicationMessage] = useState('');
+    // const [showApplyModal, setShowApplyModal] = useState(false); // Modal removido, navega direto para a página de formulário
+    // const [applicationMessage, setApplicationMessage] = useState('');
 
     useEffect(() => {
         const checkApplication = async () => {
@@ -902,7 +914,7 @@ const OpportunityDetailsPage = ({ opportunity, navigate }) => {
                     if (!querySnapshot.empty) {
                         setApplicationStatus('applied');
                     } else {
-                        setApplicationStatus(null); // Not applied
+                        setApplicationStatus(null); 
                     }
                 } catch (error) {
                     console.error("Error checking application status:", error);
@@ -921,52 +933,17 @@ const OpportunityDetailsPage = ({ opportunity, navigate }) => {
     }, [currentUser, opportunity]);
 
 
-    const handleApply = async () => {
+    const handleNavigateToApplicationForm = () => { 
         if (!currentUser) {
             setMessage("Você precisa estar logado para se candidatar.");
+            // Idealmente, abrir o modal de login aqui se setShowAuthModal e setAuthMode fossem passados como props
             return;
         }
         if (userData?.role !== 'volunteer') {
             setMessage("Apenas voluntários podem se candidatar a oportunidades.");
             return;
         }
-        if (opportunity.id.startsWith('example-')) {
-            setApplicationStatus('loading');
-            setTimeout(() => {
-                setMessage("Candidatura para vaga de exemplo enviada (simulação)!");
-                setApplicationStatus('applied');
-                localStorage.setItem(`sim_app_${opportunity.id}_${currentUser.uid}`, 'applied'); 
-                setShowApplyModal(false);
-                setApplicationMessage('');
-            }, 1000);
-            return;
-        }
-
-        setApplicationStatus('loading');
-        try {
-            const applicationsRef = collection(db, `/artifacts/${appId}/public/data/applications`);
-            await addDoc(applicationsRef, {
-                opportunityId: opportunity.id,
-                opportunityTitle: opportunity.title,
-                organizationId: opportunity.organizationId,
-                organizationName: opportunity.organizationName,
-                volunteerId: currentUser.uid,
-                volunteerName: userData.name, 
-                volunteerEmail: currentUser.email, 
-                applicationDate: Timestamp.now(),
-                status: 'Pendente', 
-                messageToOrg: applicationMessage,
-                messageFromOrg: ''
-            });
-            setMessage("Candidatura enviada com sucesso!");
-            setApplicationStatus('applied');
-            setShowApplyModal(false);
-            setApplicationMessage('');
-        } catch (error) {
-            console.error("Error applying for opportunity: ", error);
-            setMessage("Erro ao enviar candidatura. Tente novamente.");
-            setApplicationStatus('error');
-        }
+        navigate('opportunityApplication', opportunity); 
     };
 
     if (!opportunity) return <p>Oportunidade não encontrada.</p>;
@@ -1027,11 +1004,11 @@ const OpportunityDetailsPage = ({ opportunity, navigate }) => {
 
             {currentUser && userData?.role === 'volunteer' && applicationStatus !== 'applied' && (
                 <button 
-                    onClick={() => setShowApplyModal(true)}
+                    onClick={handleNavigateToApplicationForm} 
                     disabled={applicationStatus === 'loading'}
                     className="w-full sm:w-auto bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg text-lg shadow-md transition duration-150 flex items-center justify-center disabled:opacity-50"
                 >
-                    {applicationStatus === 'loading' ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div> : <Send size={20} className="mr-2" />}
+                    {applicationStatus === 'loading' ? <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div> : <FileText size={20} className="mr-2" />}
                     Quero Participar!
                 </button>
             )}
@@ -1049,37 +1026,6 @@ const OpportunityDetailsPage = ({ opportunity, navigate }) => {
                  <p className="text-blue-600 font-semibold text-lg p-4 bg-blue-50 border border-blue-300 rounded-md">
                     <Info size={20} className="inline mr-2" /> Esta é a visualização {opportunity.id.startsWith('example-') ? 'de uma vaga de exemplo' : 'da sua oportunidade'}. Voluntários podem se candidatar aqui.
                 </p>
-            )}
-
-            {showApplyModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg">
-                        <h3 className="text-xl font-semibold mb-4">Confirmar Candidatura</h3>
-                        <p className="mb-1">Você está se candidatando para: <strong>{opportunity.title}</strong></p>
-                        <p className="text-sm text-gray-600 mb-4">Organização: {opportunity.organizationName}</p>
-                        
-                        <div className="mb-4">
-                            <label htmlFor="applicationMessage" className="block text-sm font-medium text-gray-700 mb-1">
-                                Mensagem para a organização (opcional):
-                            </label>
-                            <textarea
-                                id="applicationMessage"
-                                rows="3"
-                                value={applicationMessage}
-                                onChange={(e) => setApplicationMessage(e.target.value)}
-                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:outline-none"
-                                placeholder="Deixe uma breve mensagem, se desejar..."
-                            ></textarea>
-                        </div>
-
-                        <div className="flex justify-end space-x-3">
-                            <button onClick={() => setShowApplyModal(false)} className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">Cancelar</button>
-                            <button onClick={handleApply} disabled={applicationStatus === 'loading'} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-md disabled:opacity-50">
-                                {applicationStatus === 'loading' ? 'Enviando...' : 'Confirmar e Enviar'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
             )}
         </div>
     );
@@ -1124,7 +1070,7 @@ const VolunteerDashboard = ({ navigate }) => {
     return (
         <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">Painel do Voluntário</h1>
-            <p className="text-lg text-gray-600 mb-8">Bem-vindo(a) de volta, {userData?.name}!</p>
+            <p className="text-lg text-gray-600 mb-8">Bem-vindo(a) de volta, {userData?.name || 'Voluntário(a)'}!</p>
 
             <div className="bg-white p-6 rounded-lg shadow-md">
                 <h2 className="text-2xl font-semibold text-gray-700 mb-6 flex items-center"><ListChecks size={28} className="mr-3 text-blue-600"/>Minhas Candidaturas</h2>
@@ -1284,7 +1230,7 @@ const OrganizationDashboard = ({ navigate }) => {
     return (
         <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">Painel da Organização</h1>
-            <p className="text-lg text-gray-600 mb-8">Bem-vindo(a), {userData?.name}!</p>
+            <p className="text-lg text-gray-600 mb-8">Bem-vindo(a), {userData?.name || 'Organização'}!</p>
 
             <div className="mb-8">
                 <button 
@@ -1329,12 +1275,11 @@ const OrganizationDashboard = ({ navigate }) => {
     );
 };
 
-// START OF MODIFIED SECTION: CreateOpportunityForm with region field
 const CreateOpportunityForm = ({ onClose, onSubmit, existingOpportunity }) => {
     const [title, setTitle] = useState(existingOpportunity?.title || '');
     const [description, setDescription] = useState(existingOpportunity?.description || '');
     const [category, setCategory] = useState(existingOpportunity?.category || '');
-    const [region, setRegion] = useState(existingOpportunity?.region || ''); // New state for region
+    const [region, setRegion] = useState(existingOpportunity?.region || ''); 
     const [date, setDate] = useState(existingOpportunity?.date?.seconds ? new Date(existingOpportunity.date.seconds * 1000).toISOString().split('T')[0] : '');
     const [time, setTime] = useState(existingOpportunity?.time || '');
     const [locationType, setLocationType] = useState(existingOpportunity?.locationType || 'Remoto');
@@ -1346,7 +1291,7 @@ const CreateOpportunityForm = ({ onClose, onSubmit, existingOpportunity }) => {
     const [loading, setLoading] = useState(false);
 
     const categories = ["Ajuda Humanitária", "Assistência Social", "Meio Ambiente", "Educação", "Saúde", "Animais", "Cultura", "Direitos Humanos", "Tecnologia Social", "Outros"];
-    const regions = ["Norte", "Nordeste", "Sul", "Sudeste", "Centro-Oeste", "Todas"]; // Added "Todas" for remote opportunities
+    const regions = ["Norte", "Nordeste", "Sul", "Sudeste", "Centro-Oeste", "Todas"]; 
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -1355,7 +1300,7 @@ const CreateOpportunityForm = ({ onClose, onSubmit, existingOpportunity }) => {
             title,
             description,
             category,
-            region, // Include region in data
+            region, 
             date: date ? Timestamp.fromDate(new Date(date)) : null,
             time,
             locationType,
@@ -1445,7 +1390,6 @@ const CreateOpportunityForm = ({ onClose, onSubmit, existingOpportunity }) => {
         </div>
     );
 };
-// END OF MODIFIED SECTION
 
 const ViewApplicantsModal = ({ opportunity, onClose }) => {
     const [applicants, setApplicants] = useState([]);
